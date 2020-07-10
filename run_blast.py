@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 
-from Bio import AlignIO, SeqIO, SearchIO, Entrez, motifs, PDB
+from Bio import AlignIO, SeqIO, SearchIO, Entrez, motifs
 from Bio.Alphabet import IUPAC, Gapped
 from Bio.Blast import NCBIWWW
 from Bio.Seq import Seq
+from Bio.PDB import *
 from io import StringIO
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import os
 import re
 import requests
 from scipy import stats
 from sklearn.preprocessing import MinMaxScaler
+import subprocess
 
 
 # run blast on sequence to identify homologs
@@ -114,8 +115,8 @@ def get_sequences(blast_df, template_fasta, entrez_email):
 
     Args:
         blast_df (dataframe) : dataframe with homologs
-        template_fasta (str) : template fasta file, insert for next step MSA 
-        entrez_email (str) : email to 
+        template_fasta (str) : template fasta file, insert for next step MSA
+        entrez_email (str) : email to
     """
 
     # check if sequnces already downloaded
@@ -149,14 +150,19 @@ def mafft_align(hits_fasta):
         hits_fasta (str) : fasta file with template and hits
     """
 
+    # run mafft cline
+    proc = subprocess.Popen(['mafft', f'{hits_fasta}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
+    out = out.decode('utf8')
+
+    # save output
     name = hits_fasta.split('.')[0].split('/')[-1]
-    cmd = f'mafft {hits_fasta} > outputs/{name}_mafft.fasta'
-    os.system(cmd)
+    Path(f'outputs/{name}_mafft.fasta').write_text(out)
 
 
 def clean_alignment(mafft_align):
 
-    """Removes gap columns from template sequence in MSA. 
+    """Removes gap columns from template sequence in MSA.
 
     Args:
         mafft_align (str) : fasta file with mafft aligned template and hits
@@ -185,7 +191,7 @@ def clean_alignment(mafft_align):
 def msa_to_freq(clean_fasta):
 
     """Count frequency of amino acids at each position in MSA.
-    
+
     Args:
         clean_fasta (str) : fasta file with cleaned mafft alignment
 
@@ -233,12 +239,12 @@ def shannon_entropy(msa_freq):
                         'percentile' : ppf,
                         'min_max' : scaled})
 
-    out['position'] = range(1, len(out) + 1)
-    out = out[['position', 'shannon', 'z_score', 'percentile', 'min_max']]
+    out['rel_pos'] = range(1, len(out) + 1)
+    out = out[['rel_pos', 'shannon', 'z_score', 'percentile', 'min_max']]
 
     name = msa_freq.split('.')[0].split('/')[-1].replace('_msa_freq', '')
     out.to_csv(f'outputs/{name}_entropy.csv', index=False)
-    
+
 
 def save_chain(content, chain):
 
@@ -251,7 +257,7 @@ def save_chain(content, chain):
 
     out = []
     for line in content:
-        if line.startswith('ATOM') and line.split()[4] == chain:
+        if line.startswith('ATOM') and line[21] == chain:
             out.append(line)
 
     saved_chain = '\n'.join(out)
@@ -267,7 +273,7 @@ def download_pdb(pdb):
         pdb (str) : 4 letter pdb id
     """
 
-    url = f'https://files.rcsb.org/download/{pdb}.pdb' 
+    url = f'https://files.rcsb.org/download/{pdb}.pdb'
     r = requests.get(url)
     assert r.status_code == 200, f'invalid request {pdb}'
     content = r.text.splitlines()
@@ -281,10 +287,57 @@ def replace_b(structure, new_b):
 
     Args:
         structure (BioPython Structure) : pdb
-        new_b (array) : new b-factor values to map onto pdb
+        new_b (dataframe) : dataframe with pdb_numbering and entropy data to map
     """
 
-    pass
+    # does not work when protein disordered
+    # new_b_len = len(new_b)
+    # prot_len = len(list(structure.get_residues()))
+    # assert new_b_len == prot_len, f'length mismatch new_b_len: {new_b_len} != prot_len: {prot_len}'
+
+    # inplace change b-factor
+    for resi in structure.get_residues():
+        resi_num = resi.id[1]
+        new_bfa = new_b.query("pdb_num == @resi_num").iloc[:, 1].item()
+        for atom in resi:
+            atom.set_bfactor(new_bfa)
+
+
+def get_pdb_numbers(pdb, chain):
+
+    """Match pdb residue numbering, required to skip disordered residues.
+
+    Args:
+        pdb (str) : 4 letter pdb id
+        chain (str) : subunit chain
+    Returns:
+        pdb_num : residue numbering for pdb file
+    """
+
+    # check if already downloaded
+    if Path(f'outputs/{pdb}_header.txt').exists():
+        content = Path(f'outputs/{pdb}_header.txt').read_text()
+
+    else:
+        # get from rcsb pdb header
+        url = f'http://files.rcsb.org/header/{pdb}.pdb'
+        r = requests.get(url)
+        assert r.status_code == 200, f'invalid request for {pdb}'
+
+        # save
+        content = r.text
+        Path(f'outputs/{pdb}_header.txt').write_text(content)
+
+    for line in content.splitlines():
+        if 'DBREF' in line and line.split()[2] == chain:
+            start = int(line.split()[3])
+            end = int(line.split()[4])
+
+            break
+
+    pdb_num = range(start, end + 1)
+
+    return pdb_num
 
 
 def map_se_on_pdb(pdb, chain, entropy, col):
@@ -298,26 +351,55 @@ def map_se_on_pdb(pdb, chain, entropy, col):
         col (str) : feature to map, choices are shannon, z_score, percentile, min_max
     """
 
-    # download pdb
-    pdb_content = download_pdb(pdb)
-    chain = save_chain(pdb_content, chain)
+    # check if pdb and header downloaded
+    if Path(f'outputs/{pdb}_{chain}.pdb').exists():
+        chain_content = Path(f'outputs/{pdb}_{chain}.pdb').read_text()
+        pdb_content = Path(f'outputs/{pdb}.pdb').read_text().splitlines()
+
+    else:
+        # download pdb
+        pdb_content = download_pdb(pdb)
+        chain_content = save_chain(pdb_content, chain)
+        joined_pdb = '\n'.join(pdb_content)
+        Path(f'outputs/{pdb}.pdb').write_text(joined_pdb)
+        Path(f'outputs/{pdb}_{chain}.pdb').write_text(chain_content)
 
     # load into structure
     parser = PDBParser()
-    structure = parser.get_structure('struct', StringIO(chain))
+    structure = parser.get_structure('struct', StringIO(chain_content))
 
     # new values to map
     df = pd.read_csv(entropy)
-    new_b = df[col]
+
+    # match pdb sequence numbering and re-save
+    pdb_num = get_pdb_numbers(pdb, chain)
+    assert len(pdb_num) == df.shape[0], f'length mismatch pdb_num: {len(pdb_num)} != entropy: {df.shape[0]}'
+    df['pdb_num'] = pdb_num
+    df.to_csv(entropy, index=False)
+
+    new_b = df[['pdb_num', col]]
 
     # replace
+    replace_b(structure, new_b)
 
-    
-    # save
+    # save A location (ignore disordered atom locs)
+    io = PDBIO()
+
+    class NotDisordered(Select):
+        def accept_atom(self, atom):
+            return not atom.is_disordered() or atom.get_altloc() == 'A'
+
+    io.set_structure(structure)
+    io.save(f'outputs/{pdb}_new_b.pdb', select=NotDisordered())
+
+
+def write_pml(pdb):
+
+
+    pass
 
 
 
-    
 
 
 
