@@ -103,7 +103,7 @@ def blast_to_df(blast_xml, query_lower=0.3, ident_upper=0.98):
     blast_df = blast_df.query("query_cov >= @query_lower and seq_ident <= @ident_upper")
 
     # save
-    name = blast_xml.split('.')[0].split('/')[-1]
+    name = blast_xml.split('.')[0].split('/')[-1].split('_')[0]
     blast_df.to_csv(f'outputs/{name}_blast_df.csv', index=False)
 
     return blast_df
@@ -224,8 +224,14 @@ def shannon_entropy(msa_freq):
 
     df = pd.read_csv(msa_freq)
 
-    # shannon ent
-    se = stats.entropy(df.T, base=2)
+    # select only amino acid columns and gap, drop position and extra
+    if 'pdb_num' in df.columns:
+        df = df.drop(['position', 'pdb_num'], axis=1)
+    else:
+        df = df.drop(['position'], axis=1)
+
+    # shannon ent per position
+    se = stats.entropy(df, base=2, axis=1)
 
     # convert to z-score, percentile, min-max
     zscore = stats.zscore(se)
@@ -370,13 +376,21 @@ def map_se_on_pdb(pdb, chain, entropy, col):
 
     # new values to map
     df = pd.read_csv(entropy)
+    name = entropy.split('_')[0].split('/')[-1]
+    counts_df = pd.read_csv(f'outputs/{name}_msa_freq.csv')
+
 
     # match pdb sequence numbering and re-save
     pdb_num = get_pdb_numbers(pdb, chain)
     assert len(pdb_num) == df.shape[0], f'length mismatch pdb_num: {len(pdb_num)} != entropy: {df.shape[0]}'
-    df['pdb_num'] = pdb_num
-    df.to_csv(entropy, index=False)
 
+    df['pdb_num'] = pdb_num
+    counts_df['pdb_num'] = pdb_num
+
+    df.to_csv(entropy, index=False)
+    counts_df.to_csv(f'outputs/{name}_msa_freq.csv', index=False)
+
+    # get new b-factors to map
     new_b = df[['pdb_num', col]]
 
     # replace
@@ -393,10 +407,63 @@ def map_se_on_pdb(pdb, chain, entropy, col):
     io.save(f'outputs/{pdb}_new_b.pdb', select=NotDisordered())
 
 
-def write_pml(pdb):
+def get_min_max_bfa(pdb_file):
 
+    """Get min and max b-factor for pdb_file.
 
-    pass
+    Args:
+        pdb_file (str) : pdb file
+    """
+
+    content = Path(pdb_file).read_text().splitlines()
+
+    bfa_list = []
+    for line in content:
+        if line.startswith('ATOM'):
+            bfa = float(line.split()[-2])
+            bfa_list.append(bfa)
+
+    return min(bfa_list), max(bfa_list)
+            
+
+def write_pml(pdb, chain):
+
+    """Write pml with protein colored by conservation. Add any organic ligands from original structure.
+
+    Args:
+        pdb (str) : 4 letter pdb id
+        chain (str) : subunit chain
+    """
+
+    # specturm
+    # ramp new
+
+    # get range for b-factor
+    min_b, max_b = get_min_max_bfa(f'outputs/{pdb}_new_b.pdb')
+
+    # already in the output folder
+    template = f'''
+# load clean templates and new_b
+load {pdb}.pdb
+load {pdb}_new_b.pdb
+
+# extract ligands
+extract ligands, org and chain {chain}
+remove {pdb}
+delete {pdb}
+
+# color by b factor
+spectrum b, blue_white_red, minimum={min_b}, maximum={max_b}, byres=1
+
+# draw colorbar
+ramp_new conservation, {pdb}_new_b, [{min_b}, {max_b}], color=blue_white_red
+
+# color ligs
+color green, org
+util.cnc
+'''
+
+    Path(f'outputs/{pdb}_colored.pml').write_text(template)
 
 
 
