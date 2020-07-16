@@ -85,16 +85,19 @@ def blast_to_df(blast_xml, query_lower=0.3, ident_upper=0.98):
         hit_accession = record.hits[i].accession
 
         # regex species name
-        species_regex = re.compile('\[(.*?)\]')
+        species_regex = re.compile(r'\[(.*?)\]')
 
         try:
             species = species_regex.search(hit_desc).group(1)
+            name = hit_desc.split('[')[0].rstrip()
         except:
             # unnamed samples
-            hit_desc = record.hits[i].description_all[1]
-            species = species_regex.search(hit_desc).group(1)
+            name = hit_desc
+            species = hit_desc
 
-        name = hit_desc.split('[')[0].rstrip()
+            #hit_desc = record.hits[i].description_all[1]
+            #species = species_regex.search(hit_desc).group(1)
+
 
         hits_to_save.append([hit_id, hit_desc, hit_accession, species, name, query_cov, seq_ident])
 
@@ -121,7 +124,7 @@ def get_sequences(blast_df, template_fasta, entrez_email):
 
     # check if sequnces already downloaded
     name = template_fasta.split('.')[0]
-    if Path(f'outputs/{name}_hits.xml').exists():
+    if Path(f'outputs/{name}_hits.fasta').exists():
         print(f'{name} hits already downloaded')
         return
 
@@ -424,7 +427,7 @@ def get_min_max_bfa(pdb_file):
             bfa_list.append(bfa)
 
     return min(bfa_list), max(bfa_list)
-            
+
 
 def write_pml(pdb, chain):
 
@@ -456,7 +459,7 @@ delete {pdb}
 spectrum b, blue_white_red, minimum={min_b}, maximum={max_b}, byres=1
 
 # draw colorbar
-ramp_new conservation, {pdb}_new_b, [{min_b}, {max_b}], color=blue_white_red
+ramp_new conservation, {pdb}_new_b, [{min_b}, {max_b}], color=[blue, white, red]
 
 # color ligs
 color green, org
