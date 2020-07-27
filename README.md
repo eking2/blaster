@@ -3,7 +3,7 @@
 Calculate amino acid sequence conservation from BLAST search, and map sequence
 entropy onto PDB structure.
 
-![]('assets/4e5n_conservation.png')
+![](/assets/4e5n_conservation.png)
 
 ## Instructions
 
@@ -45,10 +45,10 @@ optional arguments:
 ## Example
 
 ```
-python main -m eking2@uci.edu -t 1geg_template.fasta -p 1geg -c A
+python main.py -m eking2@uci.edu -t 1geg_template.fasta -p 1geg -c A
 ```
 
-![]('assets/1geg_conservation.png')
+![](/assets/1geg_conservation.png)
 
 Outputs includes the BLAST query xml, MAFFT sequence aligned hits, raw residue
 counts and sequence entropy at each position, PDB file with B-factors set to the
