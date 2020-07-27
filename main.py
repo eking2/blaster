@@ -11,21 +11,21 @@ def parse_args():
     parser.add_argument('-t', '--template', type=str, required=True,
                         help='template fasta to blast')
     parser.add_argument('-d', '--database', type=str, default='nr',
-                        help='database to blast')
+            help='database to blast (default: "nr")')
     parser.add_argument('-l', '--hitlist', type=int, default=1_000,
-                        help='hit list size for blast')
+                        help='hit list size for blast (default: 1,000)')
     parser.add_argument('-q', '--q_lower', type=float, default=0.3,
-                        help='threshold for query coverage')
+                        help='threshold for query coverage (default: 0.3)')
     parser.add_argument('-i', '--id_upper', type=float, default=0.98,
-                        help='threshold for sequence identity')
+                        help='threshold for sequence identity default: 0.98)')
     parser.add_argument('-m', '--entrez_email', type=str, required=True,
                         help='entrez email')
     parser.add_argument('-p', '--pdb', type=str,
                         help='pdb code to map bfactors on')
     parser.add_argument('-c', '--chain', type=str,
                         help='pdb chain to keep')
-    parser.add_argument('-f', '--feature', type=str, default='shannon',
-                        help='feature to map onto crystal b-factors')
+    parser.add_argument('-f', '--feature', type=str, default='shannon', choices=['shannon', 'z_score', 'percentile', 'min_max'],
+                        help='feature to map onto crystal b-factors (default: "shannon")')
 
     return parser.parse_args()
 
